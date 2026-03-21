@@ -2,11 +2,30 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Allow static assets always
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/api") ||
+    pathname.includes("favicon")
+  ) {
+    return NextResponse.next();
+  }
+
+  // Guard: if env vars missing, allow through to avoid crash
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     {
       cookies: {
         getAll() {
@@ -29,23 +48,18 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-
-  // Allow public routes
-  if (pathname.startsWith("/login") || pathname.startsWith("/_next") || pathname.startsWith("/api")) {
-    if (user && pathname === "/login") {
-      return NextResponse.redirect(new URL("/usuarios", request.url));
-    }
-    return supabaseResponse;
+  // Logged in + accessing /login → redirect to app
+  if (user && pathname === "/login") {
+    return NextResponse.redirect(new URL("/usuarios", request.url));
   }
 
-  // Redirect unauthenticated users to login
-  if (!user) {
+  // Not logged in + accessing protected route → redirect to login
+  if (!user && !pathname.startsWith("/login")) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Redirect root to /usuarios
-  if (pathname === "/") {
+  // Root redirect
+  if (user && pathname === "/") {
     return NextResponse.redirect(new URL("/usuarios", request.url));
   }
 
@@ -53,5 +67,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.png$|.*\\.svg$).*)"],
 };
